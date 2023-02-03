@@ -4,6 +4,8 @@
 
 main.cpp
 
+SPI_Master_C_file.C
+
 UTFT\color.c
 
 UTFT\DefaultFonts.c
