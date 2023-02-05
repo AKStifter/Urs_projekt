@@ -188,9 +188,6 @@
     <Compile Include="SPI_Master_H_file.h">
       <SubType>compile</SubType>
     </Compile>
-    <Compile Include="Touch\touch.h">
-      <SubType>compile</SubType>
-    </Compile>
     <Compile Include="UTFT\as_macros.h">
       <SubType>compile</SubType>
     </Compile>
@@ -250,7 +247,6 @@
     </Compile>
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="Touch" />
     <Folder Include="UTFT" />
   </ItemGroup>
   <Import Project="$(AVRSTUDIO_EXE_PATH)\\Vs\\Compiler.targets" />

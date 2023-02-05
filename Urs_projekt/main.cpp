@@ -9,8 +9,8 @@
 #include "SPI_Master_H_file.h"
 
 bool Touched() {
-	// PINB3 low = touched
-	if (bit_is_clear(PINB, 3)){
+	// PINB3(T-IRQ) nizak pri dodiru
+	if (bit_is_clear(PINB, T_IRQ)){
 		return true;
 		} else {
 		return false;
@@ -19,17 +19,21 @@ bool Touched() {
 
 int getX() {
 	SPI_Write(0X90);
-	float x = SPI_Read() / 120.0 * 320;
+	float x = SPI_Read() / 120.0 * 320 - 15;
 	SPI_Write(0);
 	_delay_ms(10);
 	return (int) x;
 }
 
 int getY() {
-	SPI_Write(0XD0);
-	float y = SPI_Read() / 120.0 * 240;
-	SPI_Write(0);
+	float y = 0;
+	while(y <= 0 ){
+		SPI_Write(0XD0);
+		y = SPI_Read() / 120.0 * 240;
+		SPI_Write(0);
+	}
 	_delay_ms(10);
+	
 	return (int) y;
 }
 
@@ -40,8 +44,8 @@ int main(void) {
 	display.setFont(BigFont);
 	display.clrScr();
 	
-	//T-IRQ spojen na PINB3 te je nizak samo pri dodiru, ina?e visok
-	DDRB &= 0b11110111;
+	//T-IRQ spojen na PINB3 kao ulazni te je nizak samo pri dodiru, inace visok
+	DDRB &= ~_BV(T_IRQ);
 
 	SPI_Init();
 	SS_Enable;

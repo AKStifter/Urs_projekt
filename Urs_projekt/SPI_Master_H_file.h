@@ -10,18 +10,20 @@
 #define F_CPU 7372800UL
 #include <avr/io.h>							/* Include AVR std. library file */
 
-
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
+#define T_IRQ 3
 #define MOSI 5								/* Define SPI bus pins */
 #define MISO 6
 #define SCK 7
 #define SS 4
 #define SS_Enable PORTB &= ~(1<<SS)			/* Define Slave enable */
 #define SS_Disable PORTB |= (1<<SS)			/* Define Slave disable */
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+
 
 void SPI_Init();							/* SPI initialize function */
 void SPI_Write(char);						/* SPI write data function */
