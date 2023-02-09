@@ -93,7 +93,7 @@
 #define CHALLENGE_LENGTH 30               // koliko rundi do pobjede, default 30
 #define CHALLENGE_MOVES 45                // koliko poteza mozemo napraviti do gubljenja igre u prvoj rundi, default 45
 #define CHALLENGE_TIME 120                // koliko vremena imamo za pobijediti level u prvoj rundi, default 120
-#define CHALLENGE_STEP 4                  // za koliko sekundi se smanji vrijeme po rundi
+#define CHALLENGE_STEP 3                  // za koliko sekundi se smanji vrijeme po rundi
 
 UTFT display;
 
