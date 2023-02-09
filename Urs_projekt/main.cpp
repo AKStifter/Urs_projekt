@@ -10,8 +10,8 @@
 #include "UTFT/DefaultFonts.h"
 #include "SPI_Master_H_file.h"
 
-// NOTE - lijeva strana ploce rezervirana za dodatne dijelove - povratak, br. poteza i vrijeme
-// Memory ploca
+// ===== VARIJABLE ZA GLAVNU FUNKCIJU IGRE =====
+// memory ploca
 #define BOARD_X1 79
 #define BOARD_Y1 0
 #define BOARD_X2 318
@@ -24,7 +24,7 @@
 #define BORDER_M 117	   // gornji rub srednje (middle) horizontalne linije
 #define BORDER_B 178       // gornji rub donje horizontalne linije
 
-//#define FIELD_WIDTH 56   // ne koristimo, ali je tu da se na sirina polja
+//#define FIELD_WIDTH 56   // ne koristimo, ali je tu da se zna sirina polja
 #define BORDER_WIDTH 5
 
 // koordinate karata
@@ -49,7 +49,7 @@
 #define Y2_3 178
 #define Y2_4 239
 
-// gumbi za end game
+// ===== GUMBI ZA KRAJ IGRE =====
 // gumb za povratak
 #define BACK_X1 0
 #define BACK_Y1 0
@@ -73,6 +73,7 @@
 #define NEXT_X2 310
 #define NEXT_TEXT_X 200
 
+// ===== GUMBI ZA MAIN MENU =====
 // gumb za "opusteni" nacin igre
 #define CASUAL_X1 10
 #define CASUAL_X2 100
@@ -87,6 +88,12 @@
 #define RESET_X1 220
 #define RESET_X2 310
 #define RESET_TEXT_X 245
+
+// ===== VARIJABLE ZA IZAZOVNI NACIN IGRE =====
+#define CHALLENGE_LENGTH 30               // koliko rundi do pobjede, default 30
+#define CHALLENGE_MOVES 45                // koliko poteza mozemo napraviti do gubljenja igre u prvoj rundi, default 45
+#define CHALLENGE_TIME 120                // koliko vremena imamo za pobijediti level u prvoj rundi, default 120
+#define CHALLENGE_STEP 3                  // za koliko sekundi se smanji vrijeme po rundi
 
 UTFT display;
 
@@ -131,25 +138,44 @@ uint8_t bestTime[3] = {255, 255, 255};    // najbolje (najbrze) vrijeme, pocetno
 bool started = 0;                         // ako nismo u igri koristi se za inicijalizaciju, ali i pauzira timer
 uint8_t roundCounter = 0;                 // brojac koliko krugova igre smo odigrali                         TODO - resetira se kad se ide na glavni ekran (back button?)        
 uint8_t roundStreak = 0;                  // najduze odigrana igra u rundama, povecava se na kraju igre
-bool menu = 0;                         // 0 - main menu, 1 - in game
+bool menu = 0;                            // 0 - main menu, 1 - in game
+bool challengeMode = 0;                   // 0 - normalni nacin igre, 1 - izazovni nacin igre
+uint8_t challengeMoves = CHALLENGE_MOVES; // koliko poteza imamo po rundi, pocinjemo s max postavljenim u CHALLENGE_MOVES pa smanjujemo za 1
+uint8_t challengeTime = CHALLENGE_TIME;   // koliko vremena imamo po rundi, pocinjemo s max postavljenim u CHALLENGE_TIME i smanjujemo za CHALLENGE_STEP
+uint8_t challengeEndFlag = 0;             // ako smo u izazovnoj igri, provjerava kako je zavrsila: 0 - jos traje, 1 - pobjeda, 2 - ostali smo bez poteza, 3 - isteklo vrijeme
 
 
+// ispisi vrijeme na ekran za vrijeme igre, u opustenom naciju se ispisuje proteklo vrijeme a u izazovnom preostalo
 void printTime() {
-	display.printNumI(currentTime[0], 0, 160);
-	display.print("m", 30, 160);
-	display.printNumI(currentTime[1], 0, 180);
-	display.print("s", 30, 180);
+	//ovaj dio sluzi za brisanje prijasnjeg ispisa
+	display.setColor(0, 0, 0);
+	display.fillRect(0,159,45,200);
+	display.setColor(255, 255, 255);
+	
+	if (challengeMode) {
+		display.printNumI((challengeTime - currentTime[1]) / 60, 0, 160);
+		display.print("m", 30, 160);
+		display.printNumI((challengeTime - currentTime[1]) % 60, 0, 180);
+		display.print("s", 30, 180);
+	} else {
+		display.printNumI(currentTime[0], 0, 160);
+		display.print("m", 30, 160);
+		display.printNumI(currentTime[1], 0, 180);
+		display.print("s", 30, 180);
+	}
 }
 
-// broji stotinke, sekunde i minute provedene u igri
+// broji stotinke, sekunde i minute provedene u igri, aktivira zastavicu za isteklo vrijeme
 ISR(TIMER0_COMP_vect) {
-	if (started) {  //osigurava da se ne broji dok ne igramo
+	 //osigurava da se ne broji dok ne igramo i ako je isteklo vrijeme
+	if (started && challengeEndFlag != 3) {                                     
 		currentTime[2]++;
 
 		if (currentTime[2] == 100) {
 			currentTime[2] = 0;
 
 			currentTime[1]++; 
+			
 			if (currentTime[1] == 60) {
 				currentTime[1] = 0;
 				currentTime[0]++;
@@ -158,6 +184,12 @@ ISR(TIMER0_COMP_vect) {
 				currentTime[0] = 0;
 			}
 			printTime();
+		}
+		
+		if (challengeMode) {
+			if ((challengeTime - (currentTime[0] * 60) - currentTime[1]) <= 0) {
+				challengeEndFlag = 3;
+			}
 		}
 	}
 }
@@ -207,9 +239,8 @@ uint8_t memoryGetInput() {
 	else return 0;
 }
 
-// "pokriva" kartu crtanjem crnog kvadrata preko simbola
+// "pokriva" kartu crtanjem kvadrata preko simbola
 void closeCard(uint8_t index) {
-	display.setColor(0, 0, 0);
 	switch(index) {
 		case 1:
 			display.fillRect(X1_1 + 2, Y1_1 + 1, X2_1 - 1, Y2_1 - 1);
@@ -265,23 +296,22 @@ void closeCard(uint8_t index) {
 // provjera ako je memory karta vec okrenuta
 void checkOpen() {
 	if (board[c1 - 1] != board[c2 - 1] && control[c1 - 1] == 0 && control[c2 - 1] == 0) {  //ako su karte razlicite i kontrolno polje je 0 za obje
+		display.setColor(0, 0, 0); //postavlja boju u crnu da de obrise broj
 		closeCard(c1);
-		closeCard(c2);  //TEMP
-		display.setColor(255, 255, 255);
+		closeCard(c2);  
+		display.setColor(255, 255, 255);  // vraca boju u bijelu da se ostali dijelovi mogu ispisati
 	} else { //ako su isti okrenuti, postavi kontrolno polje u 1 i povecaj broj pogodjenih parova
 		control[c1-1] = 1;
 		control[c2-1] = 1;
 		matched++;
 	}
-	state = c1 = c2 = 0;
-	moveCounter++;
 }
 
 // otkrivanje karte - crtanje simbola iz polja na plocu
 void revealCard(uint8_t input) {
 	uint16_t x = 0, y = 0;
 	
-	if (input % 4 == 1) {                 // prvi stupac
+	if (input % 4 == 1) {             // prvi stupac
 		x = X1_1;
 	} else if (input % 4 == 2) {      // drugi stupac
 		x = X1_2;
@@ -291,7 +321,7 @@ void revealCard(uint8_t input) {
 		x = X1_4;
 	}
 	
-	if ((input > 0) && (input < 5)) {                   // prvi red
+	if ((input > 0) && (input < 5)) {               // prvi red
 		y = Y1_1;
 	} else if ((input > 4) && (input < 9)) {        // drugi stupac
 		y = Y1_2;
@@ -330,7 +360,7 @@ void memoryInit() {
 	display.fillRect(BOARD_X1, BORDER_B, BOARD_X2, BORDER_B + BORDER_WIDTH);
 }
 
-// postavlja varijable u pocetne vrijednosti (ne highscores, ne broj rundi)
+// postavlja varijable u pocetne vrijednosti (ne highscores, ne broj rundi), odnosi se na varijable za trenutnu rundu
 void memoryResetVariables() {
 	  for (uint8_t i = 0; i < 16; i++) {
 		  board[i] = 0;
@@ -340,32 +370,25 @@ void memoryResetVariables() {
 	  state = 0;
 	  matched = 0;
 	  moveCounter = 0;
-	  currentTime[0] = currentTime[1] = currentTime[2] = 0;
+	  currentTime[0] = currentTime[1] = currentTime[2] = 0;  
 }
 
-/* TODO - CALL FROM MAIN MENU
+// resetira rekorde
 void resetHighscores() {
 	bestMoves = 255;
 	bestTime[0] = bestTime[1] = bestTime[2] = 255;
 	roundStreak = 0;
 }
-*/
 
-// iscrtava ekran za kraj igre, povecava broj runde, stavlja igru u not-started stanje, resetira varijable
-void memoryEndGame() {
-	roundCounter++;
-	started = 0;
-		
+// crta ekran za kraj igre
+void memoryEndGame() {	
+	// provjerava ako su trenutne varijable bolje od rekorda pa iscrtava ekran za kraj igre
 	if (moveCounter < bestMoves) bestMoves = moveCounter;
 	
-	if (currentTime[0] <= bestTime[0]) {
-		if (currentTime[1] <= bestTime[1]) {
-			if (currentTime[0] < bestTime[0]) {
-				bestTime[0] = currentTime[0];
-				bestTime[1] = currentTime[1];
-				bestTime[2] = currentTime[2];
-			}
-		}
+	if (currentTime[0] * 60 + currentTime[1] <= bestTime[0] * 60 + bestTime[1]) {
+		bestTime[0] = currentTime[0];
+		bestTime[1] = currentTime[1];
+		bestTime[2] = currentTime[2];
 	}
 	
 	if (roundCounter > roundStreak) roundStreak = roundCounter;
@@ -380,28 +403,23 @@ void memoryEndGame() {
 	display.print("Best moves:", 40, 60);
 	display.printNumI(bestMoves, 240, 60);
 		
-	display.print("Time:", 60, 90);
-	display.printNumI(currentTime[0], 140, 90);
-	display.print(":", 170, 90);
-	display.printNumI(currentTime[1], 180, 90);
-	display.print(":", 210, 90);
-	display.printNumI(currentTime[2], 220, 90);
+	display.print("Time:", 70, 90);
+	display.printNumI(currentTime[0], 150, 90);
+	display.print(":", 180, 90);
+	display.printNumI(currentTime[1], 190, 90);
 		
-	display.print("Best time:", 20, 110);
-	display.printNumI(bestTime[0], 180, 110);
-	display.print(":", 210, 110);
-	display.printNumI(bestTime[1], 220, 110);
-	display.print(":", 250, 110);
-	display.printNumI(bestTime[2], 260, 110);
+	display.print("Best time:", 30, 110);
+	display.printNumI(bestTime[0], 190, 110);
+	display.print(":", 220, 110);
+	display.printNumI(bestTime[1], 230, 110);
 ;
 	display.drawRect(EXIT_X1, BUTTONS_Y1, EXIT_X2, BUTTONS_Y2);
 	display.print("EXIT", EXIT_TEXT_X, BUTTONS_TEXT_Y);
 	display.drawRect(NEXT_X1, BUTTONS_Y1, NEXT_X2, BUTTONS_Y2);
-	display.print("NEXT", NEXT_TEXT_X, BUTTONS_TEXT_Y);
-		
-	memoryResetVariables();	  
+	display.print("NEXT", NEXT_TEXT_X, BUTTONS_TEXT_Y);	  
 }
 
+// odabir ako ce se nastaviti s igrom ili se vratiti na glavni izbornik
 uint8_t endGameGetInput() {
 	while(!Touched());
 	uint16_t x = getX();
@@ -412,6 +430,8 @@ uint8_t endGameGetInput() {
 	else return 0;
 }
 
+
+// start ekran, sluzi kao tranizicija i nasumicno generiranje ploce na temelju gdje dodirnemo
 void startGame() {
 	display.clrScr();
 	display.print("Tap to start", CENTER, 120);	
@@ -420,21 +440,81 @@ void startGame() {
 	while(!Touched());
 	uint16_t x = getX();
 	uint16_t y = getY();
-	srand(x + y);          // sluzi kao workaroun za vrijeme - generira random seed na temelju gdje smo dodirnuli
+	srand(x + y);       
+}
+
+// ekran za kraj igre u izazovnom nacinu rada (pobjeda ili izgubljena igra), vraca se na glavni izbornik
+void challengeGameOver() {
+	started = 0; 
+	
+	display.clrScr();
+	if (challengeEndFlag == 1) display.print("VICTORY", CENTER, 80);
+	else if (challengeEndFlag == 2) {
+		display.print("GAME OVER", CENTER, 80);
+		display.print("out of moves", CENTER, 100);
+	} else if (challengeEndFlag == 3) {
+		display.print("GAME OVER", CENTER, 80);
+		display.print("time ran out", CENTER, 100);
+	}
+	display.print("tap to return", CENTER, 160);
+	display.print("to main menu", CENTER, 180);
+	
+	_delay_ms(100);
+	while(!Touched());
+	memoryResetVariables();
+	challengeEndFlag = 0;
+	menu = 0;
+	return;
 }
 
 // glavni game loop
 void memoryGame() {
-	uint16_t input;
+	uint8_t input;
 	
-	while(1) {
+	while(1) {	
+		// ako su otvorene dvije karte, provjeri ako su iste i povecaj broj poteza 	
 		if (state == 2) {
 			checkOpen();
-			display.printNumI(moveCounter, 0, 80);
-		}
-		if (matched == 8) {
-			memoryEndGame();
+			state = c1 = c2 = 0;
+			moveCounter++;
 			
+			// ako smo u izazovnom nacinu, provjeri ako smo ostali bez poteza i zavrsi igru
+			if (challengeMode) {
+				if (challengeMoves - moveCounter <= 0) {
+					challengeEndFlag = 2;
+					challengeGameOver();
+					return;
+				}
+			}
+		}
+		
+		// ocisti prijasnji zapis poteza i ovisno o nacinu rada ispisi broj napravljenih ili preostalih poteza
+		display.setColor(0, 0, 0);
+		display.fillRect(0,75,45,100);
+		display.setColor(255, 255, 255);
+		if (challengeMode) display.printNumI(challengeMoves - moveCounter, 0, 80);
+		else display.printNumI(moveCounter, 0, 80);
+		
+		// ako smo pogodili svih osam parova, povecaj broj rundi i iskljuci igru, ispisi ekran za kraj igre i resetiraj varijable za rundu
+		if (matched == 8) {
+			started = 0;
+			roundCounter++;
+			
+			memoryEndGame();
+			memoryResetVariables();	  
+			
+			// ako smo u izazovnom nacinu rada, smanji broj dozvoljenih poteza za 1 i dozvoljeno vrijeme za CHALLENGE_STEP, ako je broj runde jednak tajanju igre, izadji iz igre
+			if (challengeMode) {
+				challengeMoves--;
+				challengeTime -= CHALLENGE_STEP;
+				if (roundCounter == CHALLENGE_LENGTH) {
+					challengeEndFlag = 1;
+					challengeGameOver();
+					return;
+				}
+			}
+			
+			// cekanje na ekranu za kraj igre, moze se vratiti na glavni izbornik ili ici u sljedecu rundu
 			do {
 				input = endGameGetInput();
 				if (input == 1) {
@@ -443,48 +523,51 @@ void memoryGame() {
 				}
 			} while (input == 0);
 		}
-		
 		input = memoryGetInput();
 		
-		if (!started) { //inicijalizira stanje igre pri prvom pokretanju			
+		if (!started) {                                           //inicijalizira stanje igre pri prvom pokretanju			
 			startGame();
 			memoryInit();
 			started = 1;
-		} else if (input == 20) {
+		} else if (input == 20) {                                 // povratak na glavni izbornik i resetiranje varijabli runde
 			menu = 0;
 			started = 0;
 			memoryResetVariables();
 			return;
 		} else if (input > 0 && started && !(control[input-1])) { // ako igra vec traje, pritisnut je ekran i karta nije vec pogodjena, otvori kartu
+			if (challengeMode && challengeEndFlag == 3) {         // ako smo u challenge mode i vrijeme je isteklo, izadji iz igre
+				challengeGameOver();
+				return;
+			}
+			
 			revealCard(input);
 			
-			if (state == 0 && control[input-1] == 0) { // nisu trenutno otvorene karte, ne smijemo otvarati vec otvorenu kartu
+			if (state == 0 && control[input-1] == 0) {            // nisu trenutno otvorene karte, ne smijemo otvarati vec pogodjenu kartu
 				c1 = input;
-			    if (control[c1-1] == 0) state = 1;  // promjena stanja jedino ako je u c1 spremljena karta koja nije pogodjena
-			} else if (state == 1 && control[c1-1] == 0) { // otvorena jedna karta, ne smijemo otvarati vec otvorenu kartu
+			    if (control[c1-1] == 0) state = 1;                // promjena stanja jedino ako je u c1 spremljena karta koja nije pogodjena
+			} else if (state == 1 && control[c1-1] == 0) {        // otvorena jedna karta, ne smijemo otvarati vec pogodjenu kartu
 				c2 = input;
-				if (c1 != c2 && control[c2-1] == 0) state = 2; // promjena stanja jedino ako je u c1 spremljena karta koja nije pogodjena i c1 i c2 su razliciti
+				if (c1 != c2 && control[c2-1] == 0) state = 2;    // promjena stanja jedino ako je u c1 spremljena karta koja nije pogodjena i c1 i c2 su razliciti
 			}
-		}			 
-		_delay_ms(500);
+		}	 
+		_delay_ms(50);  //debounce cekanjem
 	}
 }
 
+// crtanje glavnog izbornika
 void printMenu() {
 	display.clrScr();
 	
 	display.print("Memory", CENTER, 10);
 	
 	display.print("Best moves: ", 40, 40); 
-	if (bestMoves < 255) display.printNumI(bestMoves, 240, 40); // prikazi samo ako postoji high score
+	if (bestMoves < 255) display.printNumI(bestMoves, 220, 40);   // prikazi samo ako postoji high score
 					
-	display.print("Best time:", 20, 60);
+	display.print("Best time:", 30, 60);
 	if (bestTime[0] < 255 && bestTime[1] < 255 && bestTime[2] < 255) {
-		display.printNumI(bestTime[0], 180, 60);
-		display.print(":", 210, 60);
-		display.printNumI(bestTime[1], 220, 60);
-		display.print(":", 250, 60);
-		display.printNumI(bestTime[2], 260, 60);
+		display.printNumI(bestTime[0], 190, 60);
+		display.print(":", 220, 60);
+		display.printNumI(bestTime[1], 230, 60);
 	}		
 	
 	display.print("Longest streak:", 10 , 80);
@@ -504,18 +587,18 @@ void printMenu() {
 	display.setFont(BigFont);
 }
 
-/*
+
 uint8_t menuGetInput() {	
 	while(!Touched()); 
-	uint16_t x = getX();      //TODO ADD OPTIONS
-	uint16_t y = getY();      //TODO ADD OPTIONS
+	uint16_t x = getX();
+	uint16_t y = getY();      
 	
 	if ((x > CASUAL_X1) && (x < CASUAL_X2) && (y > BUTTONS_Y1) && (y < BUTTONS_Y2)) return 1;
-	else if ((x > CHALLENGE_X2) && (x < CHALLENGE_X2) && (y > BUTTONS_Y1) && (y < BUTTONS_Y2)) return 2;
-	else if ((x > RESET_X2) && (x < RESET_X2) && (y > BUTTONS_Y1) && (y < BUTTONS_Y2)) return 3;
+	else if ((x > CHALLENGE_X1) && (x < CHALLENGE_X2) && (y > BUTTONS_Y1) && (y < BUTTONS_Y2)) return 2;
+	else if ((x > RESET_X1) && (x < RESET_X2) && (y > BUTTONS_Y1) && (y < BUTTONS_Y2)) return 3;
 	else return 0;
 } 
-*/
+
 
 int main(void) {
 	
@@ -537,14 +620,34 @@ int main(void) {
 	
 	while (1) {		
 		if (menu == 0) {
-			roundCounter = 0;                                     //resetira broj rundi ako smo na main menu
+			roundCounter = 0;                                     // resetira broj rundi ako smo na main menu
+			challengeMoves = CHALLENGE_MOVES;                     // resetira broj dozvoljenih poteza u izazovnom nacinu
+			challengeTime = CHALLENGE_TIME;                       // resetira dozvoljeno vrijeme u izazovnom nacinu
 			printMenu();
 			_delay_ms(100);
-			while(!Touched());                      // TODO remove when game modes are implemented
-			//menuGetInput();                       // TODO normal game mode, challenge game mode or reset highscores
+			uint8_t input;                            
+			do {
+				input = menuGetInput();
+				/*
+				* 1 - "opusteni" nacin igre
+				* 2 - "izazovni" nacin igre - ograniceno vrijeme i broj poteza
+				* 3 - obrisi rekorde i ponovno ispisi glavni izbornik da se obrisu ispisani rekordi
+				* 0 - ako ne dodirnemo niti jedan gumb
+				*/
+				if (input == 1) {
+					challengeMode = 0;
+				} else if (input == 2) {
+					challengeMode = 1;
+				} else if (input == 3) {
+					resetHighscores();
+					_delay_ms(100); //debounce cekanjem da nema efekta treperenja
+					input = 0;
+					printMenu();
+				}
+			} while (input == 0);  // uvijek naprije otvori glavni izbornik i cekaj dok ne pokrenemo igru
 			menu = 1;
 		} else if (menu == 1) {
-			memoryGame();
+			memoryGame();  //pokreni igru
 		}
 	}
 }
