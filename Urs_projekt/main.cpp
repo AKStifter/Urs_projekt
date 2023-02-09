@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <util/delay.h>
 #include <stdlib.h>
+#include <avr/interrupt.h>
 #include "UTFT/UTFT.h"
 #include "UTFT/color.h"
 #include "UTFT/had.c"
@@ -83,7 +84,43 @@ uint8_t board[16] = {0};                  // ploca za igru
 bool control[16] = {0};                   // kontrolno polje, jesu li karte okrenute
 uint8_t c1 = 0, c2 = 0;                   // varijable koje pamte indeks okrenutih karti
 uint8_t state = 0;                        // stanje igre 0 - nema okrenutih karti, 1 - jedna okrenuta karta, 2 - dvije okrenute karte - provjera jesu li iste
-// uint8_t gameFinished = 0;              // 0 - igra jos traje, 1 - pobjeda, 2 - vrijeme je isteklo, TODO ideja je da imamo timer
+uint8_t matched = 0;                      // zavrsava se igra kad dostigne 8	
+uint8_t moveCounter = 0;                  // brojac poteza
+uint8_t bestMoves = 255;				  // najbolji rezultat poteza - najmanje pokusaja, postavljamo ga u najvecu mogucu vrijednost
+uint8_t currentTime[3] = {0};             // ima polja za [0] minute, [1] sekunde i [2] stotinke, igra od 16 polja nece trajati vise od 1h
+uint8_t bestTime[3] = {255, 255, 255};    // najbolje (najbrze) vrijeme, pocetno se postavlja u najvecu vrijednost
+bool started = 0;                         // ako nismo u igri koristi se za inicijalizaciju, ali i pauzira timer
+uint8_t roundCounter = 0;                 // brojac koliko krugova igre smo odigrali                         TODO - resetira se kad se ide na glavni ekran (back button?)        
+//uint8_t roundStreak = 0;                // TODO - povecava se prije reseta roundCountera, brise se s highscores reset
+
+
+void printTime() {
+	display.printNumI(currentTime[0], 0, 120);
+	display.print("m", 30, 120);
+	display.printNumI(currentTime[1], 0, 140);
+	display.print("s", 30, 140);
+}
+
+// broji stotinke, sekunde i minute provedene u igri
+ISR(TIMER0_COMP_vect) {
+	if (started) {  //osigurava da se ne broji dok ne igramo
+		currentTime[2]++;
+
+		if (currentTime[2] == 100) {
+			currentTime[2] = 0;
+
+			currentTime[1]++; 
+			if (currentTime[1] == 60) {
+				currentTime[1] = 0;
+				currentTime[0]++;
+			}
+			if (currentTime[0] == 60) {
+				currentTime[0] = 0;
+			}
+			printTime();
+		}
+	}
+}
 
 // popuni plocu nasumicno simbolima, koristimo obicne brojeve zbog jednostavnosti implementacije
 void fillBoard() {
@@ -189,18 +226,17 @@ void checkOpen() {
 		_delay_ms(300); //cekaj ~trecinu sekunde da se zatvore karte
 		closeCard(c1);
 		closeCard(c2);
-	} else { //ako su isti okrenuti, postavi kontrolno polje u 1
+	} else { //ako su isti okrenuti, postavi kontrolno polje u 1 i povecaj broj pogodjenih parova
 		control[c1-1] = 1;
 		control[c2-1] = 1;
+		matched++;
 	}
 	state = c1 = c2 = 0;
+	moveCounter++;
 }
 
 // otkrivanje karte - crtanje simbola iz polja na plocu
 void revealCard(uint8_t input) {
-	display.setColor(255, 255, 255);
-	display.setFont(BigFont);
-	
 	uint16_t x = 0, y = 0;
 	
 	if (input % 4 == 1) {                 // prvi stupac
@@ -225,6 +261,8 @@ void revealCard(uint8_t input) {
 	
 	uint8_t openSymbol = board[input - 1];
 	
+	display.setColor(255, 255, 255);
+	display.setFont(BigFont);
 	display.printNumI(openSymbol, x + 20, y + 20);
 	
 	_delay_ms(200);                                     // Debounce cekanjem
@@ -232,11 +270,14 @@ void revealCard(uint8_t input) {
 
 // inicijalno stanje memory igre - generiranje sadrzaja polja i crtanje ploce
 void memoryInit() {
-	display.clrScr();
 	fillBoard();
 	
-	//crtanje ploce za memory
+	display.clrScr();
+
+	//back button
+	//display.print("Moves", 0, 60); //broj poteza
 	
+	//crtanje ploce za memory
 	display.fillRect(BORDER_L, BOARD_Y1, BORDER_L + BORDER_WIDTH, BOARD_Y2);
 	display.fillRect(BORDER_C, BOARD_Y1, BORDER_C + BORDER_WIDTH, BOARD_Y2);
 	display.fillRect(BORDER_R, BOARD_Y1, BORDER_R + BORDER_WIDTH, BOARD_Y2);
@@ -245,34 +286,88 @@ void memoryInit() {
 	display.fillRect(BOARD_X1, BORDER_B, BOARD_X2, BORDER_B + BORDER_WIDTH);
 }
 
-//TODO - zavrsi igru kad su svi brojevi u kontrolnom polju 1, postavi varijabli u pocetne vrijednosti
-/*
-void memoryEndGame() {
-		for (uint8_t i = 0; i < 16; i++) {
-			board[i] = 0;
-			control[i] = 0;
-		}
-		c1 = c2 = 0;
-		state = 0;
+// postavlja varijable u pocetne vrijednosti (ne highscores)
+void memoryResetVariables() {
+	  for (uint8_t i = 0; i < 16; i++) {
+		  board[i] = 0;
+		  control[i] = 0;
+	  }
+	  c1 = c2 = 0;
+	  state = 0;
+	  matched = 0;
+	  moveCounter = 0;
+	  currentTime[0] = currentTime[1] = currentTime[2] = 0;
 }
-*/
+
+// iscrtava ekran za kraj igre
+void memoryEndGame() {
+	roundCounter++;
+	started = 0;
+		
+	if (moveCounter < bestMoves) bestMoves = moveCounter;
+	
+	if (currentTime[0] <= bestTime[0]) {
+		if (currentTime[1] <= bestTime[1]) {
+			if (currentTime[0] < bestTime[0]) {
+				bestTime[0] = currentTime[0];
+				bestTime[1] = currentTime[1];
+				bestTime[2] = currentTime[2];
+			}
+		}
+	}
+	
+	display.clrScr();
+	
+	display.print("Round:", 100, 10);
+	display.printNumI(roundCounter, 200, 10);
+	
+	display.print("Moves:", 90, 40);
+	display.printNumI(moveCounter, 190, 40);
+	display.print("Best moves:", 40, 60);
+	display.printNumI(bestMoves, 240, 60);
+		
+	display.print("Time:", 60, 90);
+	display.printNumI(currentTime[0], 140, 90);
+	display.print(":", 170, 90);
+	display.printNumI(currentTime[1], 180, 90);
+	display.print(":", 210, 90);
+	display.printNumI(currentTime[2], 220, 90);
+		
+	display.print("Best time:", 20, 110);
+	display.printNumI(bestTime[0], 180, 110);
+	display.print(":", 210, 110);
+	display.printNumI(bestTime[1], 220, 110);
+	display.print(":", 250, 110);
+	display.printNumI(bestTime[2], 260, 110);
+		
+	display.print("Continue", CENTER, 180);
+		
+	memoryResetVariables();	  
+}
 
 // glavni game loop
 void memoryGame() {
 	uint16_t input;
 	
-	bool started = 0;
-	
 	while(1) {
-		if (state == 2) checkOpen(); 
+		if (state == 2) {
+			checkOpen();
+			display.setColor(255, 255, 255);
+			display.printNumI(moveCounter, 0, 100);
+		}
+		if (matched == 8) {
+			memoryEndGame();
+		}
+		
 		input = memoryGetInput(); //svakih pola sekunde provjeri input 
 
 		if (!started) { //inicijalizira stanje igre pri prvom pokretanju
+			//display.print("Tap to start", CENTER, 119);
 			
 			// sluzi kao workaroun za vrijeme - generira random seed na temelju gdje smo dodirnuli
 			uint16_t x = getX();
 			uint16_t y = getY();
-			srand(x+y);
+			srand(x + y);
 
 			memoryInit();
 			started = 1;
@@ -287,8 +382,7 @@ void memoryGame() {
 					c2 = input;
 					if (c1 != c2 && control[c2-1] == 0) state = 2; // promjena stanja jedino ako je u c1 spremljena karta koja nije pogodjena i c1 i c2 su razliciti
 			}
-		}			
-			
+		}			 
 		_delay_ms(500);
 	}
 }
@@ -297,6 +391,12 @@ int main(void) {
 	
 	//T-IRQ spojen na PINB3 kao ulazni te je nizak samo pri dodiru, inace visok
 	DDRB &= ~_BV(T_IRQ);
+	
+	// timer za brojanje vremena
+	TCCR0 = _BV(WGM01) | _BV(CS02) | _BV(CS00);
+	OCR0 = 72;
+	TIMSK = _BV(OCIE0);
+	sei();
 
 	SPI_Init();
 	SS_Enable;
@@ -306,7 +406,11 @@ int main(void) {
 	display.setFont(BigFont);
 	
 	while (1) {
-		display.print("Tap to start", CENTER, 119);
+		display.print("Memory", CENTER, 20);
+		//display.print("Best moves: ", 40, 60); za kasnije main menu
+		//if (bestMoves < 255) display.printNumI(bestMoves, 240, 60); // prikazi samo ako postoji high score
+		display.print("Tap to start", CENTER, 120);
+		
 		memoryGame();
 	}
 }
