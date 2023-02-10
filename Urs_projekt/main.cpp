@@ -143,6 +143,7 @@ bool challengeMode = 0;                   // 0 - normalni nacin igre, 1 - izazov
 uint8_t challengeMoves = CHALLENGE_MOVES; // koliko poteza imamo po rundi, pocinjemo s max postavljenim u CHALLENGE_MOVES pa smanjujemo za 1
 uint8_t challengeTime = CHALLENGE_TIME;   // koliko vremena imamo po rundi, pocinjemo s max postavljenim u CHALLENGE_TIME i smanjujemo za CHALLENGE_STEP
 uint8_t challengeEndFlag = 0;             // ako smo u izazovnoj igri, provjerava kako je zavrsila: 0 - jos traje, 1 - pobjeda, 2 - ostali smo bez poteza, 3 - isteklo vrijeme
+bool gameBeaten = 0;                      // jesmo li pobijedili igru u izazovnom nacinu
 
 
 // ispisi vrijeme na ekran za vrijeme igre, u opustenom naciju se ispisuje proteklo vrijeme a u izazovnom preostalo
@@ -448,7 +449,10 @@ void challengeGameOver() {
 	started = 0; 
 	
 	display.clrScr();
-	if (challengeEndFlag == 1) display.print("VICTORY", CENTER, 80);
+	if (challengeEndFlag == 1) {
+		display.print("VICTORY", CENTER, 80);
+		gameBeaten = 1;
+	}
 	else if (challengeEndFlag == 2) {
 		display.print("GAME OVER", CENTER, 80);
 		display.print("out of moves", CENTER, 100);
@@ -570,10 +574,12 @@ void printMenu() {
 		display.printNumI(bestTime[1], 230, 60);
 	}		
 	
-	display.print("Longest streak:", 10 , 80);
-	display.printNumI(roundStreak, 250, 80);
+	display.print("Longest streak:", 20 , 80);
+	display.printNumI(roundStreak, 260, 80); 
 	
 	display.setFont(SmallFont);
+	
+	if (gameBeaten) display.print("CHALLENGE MODE BEATEN", 80, 120);
 	
     display.drawRect(CASUAL_X1, BUTTONS_Y1, CASUAL_X2, BUTTONS_Y2);
 	display.print("CASUAL", CASUAL_TEXT_X, BUTTONS_TEXT_Y);
